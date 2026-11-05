@@ -77,6 +77,10 @@ FOLLOW_AGENT_KEYS = ('reasoning_effort', 'reasoning_overrides', 'service_tier', 
 SELECTION_KEYS = ('default', 'provider', 'base_url', 'api_mode', 'selection_profile', 'api_key_from', 'key_env',
                   'api_key_env')
 BYPASS_FIELDS = ('safe_mode', 'ignore_user_config')
+# A launch/resume ``base_url`` an endpoint may carry: HTTP, plus the routes of ``external_process``
+# providers (``process://<slug>``, ``acp://<vendor>``, ``acp+tcp://host:port``), which Desktop echoes
+# back on resume (#149114). A shape check only; whether the provider serves it is runtime resolution's.
+LAUNCH_BASE_URL_SCHEMES = ('http', 'https', 'process', 'acp', 'acp+tcp')
 _ACTIVE_POLICY: ContextVar = ContextVar('local_session_policy', default=None)
 _TURN_PROFILE: ContextVar = ContextVar('follow_profile_read', default=None)  # (policy, live) for a turn
 # Creation label -> agent surface. ``tool`` (third-party integrations, ``hermes chat --source tool``) and
@@ -604,9 +608,10 @@ def _apply_launch_overrides(params, config):
                 _refuse(key, 'must be a non-empty string')
             if key == 'base_url':
                 url = urlsplit(value)
-                if (url.scheme not in {'http', 'https'} or not url.hostname
+                if (url.scheme not in LAUNCH_BASE_URL_SCHEMES or not url.hostname
                         or url.username or url.password or url.query or url.fragment):
-                    _refuse('base_url', 'must be an http(s) URL without credentials, query or fragment')
+                    _refuse('base_url', f"must be an {', '.join(LAUNCH_BASE_URL_SCHEMES[:-1])} or "
+                                        f'{LAUNCH_BASE_URL_SCHEMES[-1]} URL without credentials, query or fragment')
             config.setdefault('model', {})[key] = value
     bad_flag = next((flag for flag in ('ignore_rules', 'yolo', 'checkpoints', 'accept_hooks', 'pass_session_id',
                                       'follow_profile_config', 'cwd_explicit', 'verbose')
