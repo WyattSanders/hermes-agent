@@ -514,7 +514,10 @@ class HostedRoomRuntime:
                 should_wake = binding.room_id in self._rooms_needing_reschedule
                 self._rooms_needing_reschedule.discard(binding.room_id)
             if should_wake:
-                self.wakeup()
+                # This room already left its slot, so waking the supervisor schedules its
+                # follow-up. wakeup() would re-mark every room still running, and rooms whose
+                # runs overlap would then reschedule each other forever.
+                self._wake.set()
 
     def _process_room(self, binding: HostedRoomBinding) -> None:
         if self.prepare_room is not None:
