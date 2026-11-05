@@ -3,7 +3,10 @@ Schema, validation and a thin dispatcher; the UI lives in a platform-provided
 callback (cli.py, gateway/run.py, tui_gateway)."""
 
 import json
+import logging
 from typing import Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 MAX_CHOICES = 4  # the UI always appends an "Other (type your answer)" row
 MAX_QUESTIONS = 5  # independent questions per call
@@ -11,25 +14,43 @@ MAX_QUESTIONS = 5  # independent questions per call
 # source, instead of a surface silently dropping a choice that ``choices_offered`` still reports as shown.
 MAX_CHOICE_CHARS = 8000
 # Applied to the first choice here (not per-surface) so every adapter renders it identically.
+# English fallback for ``gateway.clarify.recommended``; also always stripped, so an answer typed
+# or copied before a language change still comes back clean.
 RECOMMENDED_LABEL = "(Recommended)"
+_RECOMMENDED_KEY = "gateway.clarify.recommended"
 _UNAVAILABLE = "Clarify tool is not available in this execution context."
 _SHAPE = "Pass questions=[{question, choices?, multi_select?}]; a single question is a one-entry array."
 
 
+def recommended_label() -> str:
+    """The label in the active ``display.language``; English when the key is missing or i18n
+    cannot resolve here (a broken overlay/config must not take the clarify tool down with it)."""
+    try:
+        from agent.i18n import t
+        label = t(_RECOMMENDED_KEY).strip()
+    except Exception:
+        logger.debug("clarify: recommended label falls back to English", exc_info=True)
+        return RECOMMENDED_LABEL
+    return label if label and label != _RECOMMENDED_KEY else RECOMMENDED_LABEL
+
+
 def mark_recommended(choices: list[str]) -> list[str]:
-    """Suffix the first choice (schema says best-first) with RECOMMENDED_LABEL; idempotent,
+    """Suffix the first choice (schema says best-first) with the localized label; idempotent,
     and a lone choice is left untouched (nothing to prefer it over)."""
     first = str(choices[0]).strip() if choices else ""
     if len(choices) < 2 or first != strip_recommended(first):
         return choices
-    return [f"{first} {RECOMMENDED_LABEL}"] + list(choices[1:])
+    return [f"{first} {recommended_label()}"] + list(choices[1:])
 
 
 def strip_recommended(text: str) -> str:
-    """Remove the recommendation label so presentation never leaks into ``user_response``."""
+    """Remove the recommendation label (active language or English, any case) so presentation
+    never leaks into ``user_response``."""
     stripped = str(text).strip()
-    if stripped.casefold().endswith(RECOMMENDED_LABEL.casefold()):
-        return stripped[: -len(RECOMMENDED_LABEL)].strip()
+    for label in dict.fromkeys((recommended_label(), RECOMMENDED_LABEL)):
+        # Compare the tail itself: casefold() can change length (ß -> ss), so slicing a casefolded copy misaligns.
+        if len(stripped) >= len(label) and stripped[-len(label):].casefold() == label.casefold():
+            return stripped[: -len(label)].strip()
     return stripped
 
 
